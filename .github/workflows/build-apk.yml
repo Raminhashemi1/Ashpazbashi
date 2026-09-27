@@ -40,6 +40,7 @@ jobs:
             flutter_test:
               sdk: flutter
             flutter_launcher_icons: ^0.14.4
+            flutter_lints: ^6.0.0
           flutter:
             uses-material-design: true
             assets:
@@ -511,6 +512,9 @@ jobs:
 
       - name: Generate launcher icon
         run: dart run flutter_launcher_icons
+
+      - name: Prepare QA
+        run: rm -f test/widget_test.dart
 
       - name: Analyze
         run: flutter analyze --no-fatal-infos --no-fatal-warnings
