@@ -1,0 +1,484 @@
+name: Build Ashpazbashi APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Create Flutter project
+        run: |
+          flutter create --project-name ashpazbashi --platforms=android .
+          mkdir -p lib assets/images test
+
+      - name: Write pubspec
+        run: |
+          cat > pubspec.yaml <<'EOF'
+          name: ashpazbashi
+          description: Persian smart cooking app test build
+          publish_to: 'none'
+          version: 0.3.0+5
+          environment:
+            sdk: '>=3.3.0 <4.0.0'
+          dependencies:
+            flutter:
+              sdk: flutter
+            flutter_localizations:
+              sdk: flutter
+            shared_preferences: ^2.5.3
+          dev_dependencies:
+            flutter_test:
+              sdk: flutter
+            flutter_launcher_icons: ^0.14.4
+          flutter:
+            uses-material-design: true
+            assets:
+              - assets/images/logo.png
+              - assets/images/app_icon.png
+          flutter_launcher_icons:
+            android: true
+            image_path: assets/images/app_icon.png
+            min_sdk_android: 21
+            adaptive_icon_background: "#FFF8ED"
+            adaptive_icon_foreground: assets/images/app_icon.png
+          EOF
+
+      - name: Write app source
+        run: |
+          cat > lib/main.dart <<'EOF'
+          import 'package:flutter/material.dart';
+          import 'package:flutter_localizations/flutter_localizations.dart';
+          import 'package:shared_preferences/shared_preferences.dart';
+
+          const saffron = Color(0xFFF5A623);
+          const tomato = Color(0xFFE85D2A);
+          const cinnamon = Color(0xFF6E351F);
+          const cream = Color(0xFFFFF8ED);
+
+          Future<void> main() async {
+            WidgetsFlutterBinding.ensureInitialized();
+            final prefs = await SharedPreferences.getInstance();
+            runApp(AshpazBashi(prefs: prefs));
+          }
+
+          class AshpazBashi extends StatelessWidget {
+            const AshpazBashi({super.key, required this.prefs});
+            final SharedPreferences prefs;
+
+            @override
+            Widget build(BuildContext context) {
+              return MaterialApp(
+                debugShowCheckedModeBanner: false,
+                locale: const Locale('fa'),
+                supportedLocales: const [Locale('fa')],
+                localizationsDelegates: const [
+                  GlobalMaterialLocalizations.delegate,
+                  GlobalWidgetsLocalizations.delegate,
+                  GlobalCupertinoLocalizations.delegate,
+                ],
+                theme: ThemeData(
+                  useMaterial3: true,
+                  colorScheme: ColorScheme.fromSeed(seedColor: tomato),
+                  scaffoldBackgroundColor: cream,
+                  filledButtonTheme: FilledButtonThemeData(
+                    style: FilledButton.styleFrom(
+                      backgroundColor: tomato,
+                      minimumSize: const Size.fromHeight(52),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+                    ),
+                  ),
+                  inputDecorationTheme: InputDecorationTheme(
+                    filled: true,
+                    fillColor: Colors.white,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(18),
+                      borderSide: BorderSide.none,
+                    ),
+                  ),
+                ),
+                home: Directionality(
+                  textDirection: TextDirection.rtl,
+                  child: Home(prefs: prefs),
+                ),
+              );
+            }
+          }
+
+          class Home extends StatefulWidget {
+            const Home({super.key, required this.prefs});
+            final SharedPreferences prefs;
+            @override
+            State<Home> createState() => _HomeState();
+          }
+
+          class _HomeState extends State<Home> {
+            int tab = 0;
+            late DateTime trialStart;
+            final shopping = <String>[];
+            final ingredients = TextEditingController();
+            final shopController = TextEditingController();
+
+            @override
+            void initState() {
+              super.initState();
+              final raw = widget.prefs.getString('trial_start');
+              if (raw == null) {
+                trialStart = DateTime.now();
+                widget.prefs.setString('trial_start', trialStart.toIso8601String());
+              } else {
+                trialStart = DateTime.tryParse(raw) ?? DateTime.now();
+              }
+              shopping.addAll(widget.prefs.getStringList('shopping') ?? []);
+            }
+
+            int get daysLeft {
+              final end = trialStart.add(const Duration(days: 10));
+              final hours = end.difference(DateTime.now()).inHours;
+              if (hours <= 0) return 0;
+              return (hours / 24).ceil().clamp(0, 10);
+            }
+
+            bool get premium => widget.prefs.getBool('premium') ?? false;
+            bool get access => premium || daysLeft > 0;
+
+            @override
+            void dispose() {
+              ingredients.dispose();
+              shopController.dispose();
+              super.dispose();
+            }
+
+            @override
+            Widget build(BuildContext context) {
+              final pages = [
+                _homePage(),
+                _aiPage(),
+                _shoppingPage(),
+                _profilePage(),
+              ];
+              return Scaffold(
+                appBar: AppBar(
+                  title: Row(children: [
+                    Image.asset('assets/images/logo.png', width: 38, height: 38),
+                    const SizedBox(width: 8),
+                    const Text('آشپزباشی', style: TextStyle(fontWeight: FontWeight.w900)),
+                  ]),
+                  actions: [
+                    if (!premium)
+                      Padding(
+                        padding: const EdgeInsets.only(left: 8),
+                        child: Chip(label: Text('$daysLeft روز آزمایشی')),
+                      ),
+                  ],
+                ),
+                body: pages[tab],
+                bottomNavigationBar: NavigationBar(
+                  selectedIndex: tab,
+                  onDestinationSelected: (v) => setState(() => tab = v),
+                  destinations: const [
+                    NavigationDestination(icon: Icon(Icons.home_outlined), selectedIcon: Icon(Icons.home), label: 'خانه'),
+                    NavigationDestination(icon: Icon(Icons.auto_awesome_outlined), selectedIcon: Icon(Icons.auto_awesome), label: 'آشپز هوشمند'),
+                    NavigationDestination(icon: Icon(Icons.shopping_basket_outlined), selectedIcon: Icon(Icons.shopping_basket), label: 'خرید'),
+                    NavigationDestination(icon: Icon(Icons.person_outline), selectedIcon: Icon(Icons.person), label: 'پروفایل'),
+                  ],
+                ),
+              );
+            }
+
+            Widget _homePage() {
+              final recipes = [
+                ('🍗', 'زرشک پلو با مرغ', '۷۵ دقیقه'),
+                ('🥘', 'قورمه سبزی', '۱۵۰ دقیقه'),
+                ('🍳', 'املت گوجه سریع', '۱۵ دقیقه'),
+                ('🥣', 'عدسی صبحانه', '۴۵ دقیقه'),
+              ];
+              return ListView(
+                padding: const EdgeInsets.all(18),
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(20),
+                    decoration: BoxDecoration(
+                      gradient: const LinearGradient(colors: [Color(0xFFFFEEE2), Color(0xFFFFF8ED)]),
+                      borderRadius: BorderRadius.circular(26),
+                    ),
+                    child: const Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('امروز چی بپزیم؟', style: TextStyle(fontSize: 28, fontWeight: FontWeight.w900, color: cinnamon)),
+                        SizedBox(height: 8),
+                        Text('دستورهای خوشمزه، لیست خرید و پیشنهاد هوشمند در یک جا.', style: TextStyle(height: 1.7)),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 18),
+                  const Text('پیشنهادهای امروز', style: TextStyle(fontSize: 21, fontWeight: FontWeight.w900)),
+                  const SizedBox(height: 10),
+                  ...recipes.map((r) => Card(
+                    child: ListTile(
+                      contentPadding: const EdgeInsets.all(14),
+                      leading: Text(r.$1, style: const TextStyle(fontSize: 38)),
+                      title: Text(r.$2, style: const TextStyle(fontWeight: FontWeight.w800)),
+                      subtitle: Text(r.$3),
+                      trailing: const Icon(Icons.chevron_left),
+                      onTap: () => _recipe(r.$2),
+                    ),
+                  )),
+                ],
+              );
+            }
+
+            void _recipe(String title) {
+              showModalBottomSheet(
+                context: context,
+                isScrollControlled: true,
+                builder: (_) => Directionality(
+                  textDirection: TextDirection.rtl,
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 20, 20, 36),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(title, style: const TextStyle(fontSize: 26, fontWeight: FontWeight.w900)),
+                        const SizedBox(height: 12),
+                        const Text('مواد لازم', style: TextStyle(fontSize: 19, fontWeight: FontWeight.w800)),
+                        const Text('• پیاز\n• ادویه\n• مواد اصلی غذا\n• نمک و فلفل', style: TextStyle(height: 1.8)),
+                        const SizedBox(height: 12),
+                        FilledButton.icon(
+                          onPressed: () async {
+                            for (final i in ['پیاز', 'ادویه', 'نمک', 'فلفل']) {
+                              if (!shopping.contains(i)) shopping.add(i);
+                            }
+                            await widget.prefs.setStringList('shopping', shopping);
+                            if (mounted) {
+                              Navigator.pop(context);
+                              setState(() => tab = 2);
+                            }
+                          },
+                          icon: const Icon(Icons.add_shopping_cart),
+                          label: const Text('افزودن مواد به لیست خرید'),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              );
+            }
+
+            Widget _aiPage() {
+              return ListView(
+                padding: const EdgeInsets.all(18),
+                children: [
+                  const Text('✨ آشپز هوشمند', style: TextStyle(fontSize: 28, fontWeight: FontWeight.w900, color: cinnamon)),
+                  const SizedBox(height: 8),
+                  const Text('مواد داخل خانه را بنویس تا یک پیشنهاد سریع بگیری.'),
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: ingredients,
+                    minLines: 3,
+                    maxLines: 5,
+                    decoration: const InputDecoration(hintText: 'مثلاً مرغ، قارچ، برنج، گوجه...'),
+                  ),
+                  const SizedBox(height: 12),
+                  FilledButton.icon(
+                    onPressed: () {
+                      if (!access) {
+                        _paywall();
+                        return;
+                      }
+                      final text = ingredients.text.trim();
+                      if (text.isEmpty) return;
+                      showDialog(
+                        context: context,
+                        builder: (_) => AlertDialog(
+                          title: const Text('پیشنهاد آشپزباشی'),
+                          content: Text('با «$text» می‌توانی یک خوراک تابه‌ای سریع درست کنی. مواد سفت‌تر را اول تفت بده، سپس بقیه مواد و ادویه را اضافه کن و با حرارت متوسط بپز.'),
+                          actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('باشه'))],
+                        ),
+                      );
+                    },
+                    icon: const Icon(Icons.auto_awesome),
+                    label: const Text('پیشنهاد غذا'),
+                  ),
+                  const SizedBox(height: 20),
+                  const Card(
+                    child: Padding(
+                      padding: EdgeInsets.all(16),
+                      child: Text('نسخه نهایی می‌تواند به هوش مصنوعی سمت سرور، تشخیص مواد از عکس، فرمان صوتی و برنامه غذایی هفتگی متصل شود.', style: TextStyle(height: 1.7)),
+                    ),
+                  ),
+                ],
+              );
+            }
+
+            Widget _shoppingPage() {
+              return Padding(
+                padding: const EdgeInsets.all(18),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('🛒 لیست خرید', style: TextStyle(fontSize: 28, fontWeight: FontWeight.w900)),
+                    const SizedBox(height: 14),
+                    Row(children: [
+                      Expanded(child: TextField(controller: shopController, decoration: const InputDecoration(hintText: 'مثلاً زعفران'))),
+                      const SizedBox(width: 8),
+                      IconButton.filled(
+                        onPressed: () async {
+                          final v = shopController.text.trim();
+                          if (v.isEmpty) return;
+                          if (!shopping.contains(v)) shopping.add(v);
+                          await widget.prefs.setStringList('shopping', shopping);
+                          shopController.clear();
+                          setState(() {});
+                        },
+                        icon: const Icon(Icons.add),
+                      ),
+                    ]),
+                    const SizedBox(height: 12),
+                    Expanded(
+                      child: shopping.isEmpty
+                          ? const Center(child: Text('لیست خرید خالی است.'))
+                          : ListView.builder(
+                              itemCount: shopping.length,
+                              itemBuilder: (_, i) => Dismissible(
+                                key: ValueKey(shopping[i]),
+                                onDismissed: (_) async {
+                                  shopping.removeAt(i);
+                                  await widget.prefs.setStringList('shopping', shopping);
+                                  setState(() {});
+                                },
+                                background: Container(color: Colors.red.shade100),
+                                child: ListTile(
+                                  leading: const Icon(Icons.check_box_outline_blank),
+                                  title: Text(shopping[i]),
+                                ),
+                              ),
+                            ),
+                    ),
+                  ],
+                ),
+              );
+            }
+
+            Widget _profilePage() {
+              return ListView(
+                padding: const EdgeInsets.all(18),
+                children: [
+                  Center(child: Image.asset('assets/images/logo.png', width: 140, height: 140)),
+                  const SizedBox(height: 10),
+                  const Text('آشپزباشی', textAlign: TextAlign.center, style: TextStyle(fontSize: 28, fontWeight: FontWeight.w900)),
+                  const SizedBox(height: 6),
+                  Text(
+                    premium ? 'نسخه کامل فعال است' : '$daysLeft روز از دوره آزمایشی باقی مانده',
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 20),
+                  Card(
+                    child: Column(children: [
+                      ListTile(leading: const Icon(Icons.timer_outlined), title: const Text('دوره آزمایشی'), trailing: Text(premium ? 'کامل' : '۱۰ روز')),
+                      ListTile(leading: const Icon(Icons.shopping_basket_outlined), title: const Text('اقلام خرید'), trailing: Text('${shopping.length}')),
+                    ]),
+                  ),
+                  const SizedBox(height: 12),
+                  if (!premium)
+                    FilledButton.icon(
+                      onPressed: _paywall,
+                      icon: const Icon(Icons.workspace_premium),
+                      label: const Text('مشاهده نسخه کامل'),
+                    ),
+                ],
+              );
+            }
+
+            void _paywall() {
+              showModalBottomSheet(
+                context: context,
+                isScrollControlled: true,
+                builder: (_) => Directionality(
+                  textDirection: TextDirection.rtl,
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 24, 20, 40),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.workspace_premium, size: 70, color: saffron),
+                        const Text('آشپزباشی پلاس', style: TextStyle(fontSize: 28, fontWeight: FontWeight.w900)),
+                        const SizedBox(height: 10),
+                        const Text('پس از ۱۰ روز آزمایشی، برای ادامه امکانات هوشمند می‌توان اشتراک ماهانه یا سالانه تهیه کرد.', textAlign: TextAlign.center, style: TextStyle(height: 1.7)),
+                        const SizedBox(height: 18),
+                        FilledButton(
+                          onPressed: () async {
+                            await widget.prefs.setBool('premium', true);
+                            if (mounted) {
+                              Navigator.pop(context);
+                              setState(() {});
+                            }
+                          },
+                          child: const Text('فعال‌سازی نسخه کامل — دمو'),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              );
+            }
+          }
+          EOF
+
+      - name: Write test
+        run: |
+          cat > test/app_test.dart <<'EOF'
+          import 'package:flutter_test/flutter_test.dart';
+          void main() {
+            test('trial is ten days', () {
+              final start = DateTime(2026, 1, 1);
+              expect(start.add(const Duration(days: 10)).difference(start).inDays, 10);
+            });
+          }
+          EOF
+
+      - name: Restore Ashpazbashi icon
+        run: |
+          echo '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' | base64 -d > assets/images/app_icon.png
+          cp assets/images/app_icon.png assets/images/logo.png
+
+      - name: Set Persian app name
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('android/app/src/main/AndroidManifest.xml')
+          s=p.read_text()
+          s=s.replace('android:label="ashpazbashi"', 'android:label="آشپزباشی"')
+          p.write_text(s)
+          PY
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Generate launcher icon
+        run: dart run flutter_launcher_icons
+
+      - name: Analyze
+        run: flutter analyze
+
+      - name: Test
+        run: flutter test
+
+      - name: Build release APK
+        run: flutter build apk --release
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: AshpazBashi-Android-APK
+          path: build/app/outputs/flutter-apk/app-release.apk
