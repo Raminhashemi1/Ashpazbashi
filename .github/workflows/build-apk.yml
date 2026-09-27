@@ -438,15 +438,19 @@ jobs:
 
       - name: Write test
         run: |
-          rm -f test/widget_test.dart\n          cat > test/app_test.dart <<'EOF'
-          import 'package:flutter_test/flutter_test.dart';
-          void main() {
-            test('trial is ten days', () {
-              final start = DateTime(2026, 1, 1);
-              expect(start.add(const Duration(days: 10)).difference(start).inDays, 10);
-            });
-          }
-          EOF
+          rm -f test/widget_test.dart test/app_test.dart
+          python3 - <<'PY'
+          from pathlib import Path
+          Path('test/app_test.dart').write_text("""import 'package:flutter_test/flutter_test.dart';
+
+void main() {
+  test('trial is ten days', () {
+    final start = DateTime(2026, 1, 1);
+    expect(start.add(const Duration(days: 10)).difference(start).inDays, 10);
+  });
+}
+""", encoding='utf-8')
+          PY
 
       - name: Create Ashpazbashi launcher icon
         run: |
